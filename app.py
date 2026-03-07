@@ -84,7 +84,7 @@ async def generate(
             nemo_base=(nemo_base or NEMO_BASE_URL).rstrip("/"),
             api_token=api_token,
             generate_pdf=(generate_pdf == "on"),
-            logo_path=None,
+            logo_path=os.path.join(os.path.dirname(__file__), "columbia_logo.png",
         )
 
         zips = create_monthly_invoice_zips(outdir, df, remove_members=True)
