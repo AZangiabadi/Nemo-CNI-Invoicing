@@ -1277,7 +1277,7 @@ def launch_gui_app() -> None:
     base_var = tk.StringVar(value=NEMO_BASE_URL)
     token_var = tk.StringVar(value="")
     logo_var = tk.StringVar(value="")
-    pdf_var = tk.BooleanVar(value=True)
+    pdf_var = tk.BooleanVar(value=_pdf_available())
     zip_var = tk.BooleanVar(value=True)
     keep_var = tk.BooleanVar(value=True)
     status_var = tk.StringVar(value="Ready.")
@@ -1327,7 +1327,8 @@ def launch_gui_app() -> None:
         token = token_var.get().strip() or None
         nemo_base = (base_var.get().strip() or NEMO_BASE_URL).rstrip("/")
 
-        generate_pdf = bool(pdf_var.get())
+        generate_pdf_requested = bool(pdf_var.get())
+        generate_pdf = generate_pdf_requested and _pdf_available()
         generate_zip = bool(zip_var.get())
         keep_files = bool(keep_var.get())
 
@@ -1357,7 +1358,9 @@ def launch_gui_app() -> None:
                 zips_created = create_monthly_invoice_zips(outdir, df, remove_members=(not keep_files))
 
             msg = f"Created {xlsx_created} XLSX invoice(s)"
-            if generate_pdf:
+            if generate_pdf_requested and not generate_pdf:
+                msg += "\nPDF generation was selected, but reportlab is not installed. Only XLSX files were created."
+            elif generate_pdf:
                 msg += f" and {pdf_created} PDF invoice(s)"
             if generate_zip:
                 msg += f" and {len(zips_created)} ZIP file(s)"
@@ -1414,7 +1417,13 @@ def launch_gui_app() -> None:
     logo_entry.grid(row=4, column=1, sticky="ew", padx=pad_x, pady=pad_y)
     tk.Button(root, text="Browse...", command=pick_logo).grid(row=4, column=2, padx=pad_x, pady=pad_y)
 
-    tk.Checkbutton(root, text="Generate PDF", variable=pdf_var, **check_opts).grid(row=5, column=0, sticky="w", padx=pad_x, pady=pad_y)
+    pdf_checkbox = tk.Checkbutton(root, text="Generate PDF", variable=pdf_var, **check_opts)
+    pdf_checkbox.grid(row=5, column=0, sticky="w", padx=pad_x, pady=pad_y)
+    if not _pdf_available():
+        pdf_checkbox.config(state="disabled")
+        tk.Label(root, text="PDF unavailable: reportlab not installed", **label_opts).grid(
+            row=6, column=0, sticky="w", padx=pad_x, pady=pad_y
+        )
     tk.Checkbutton(root, text="Generate ZIP", variable=zip_var, **check_opts).grid(row=5, column=1, sticky="w", padx=pad_x, pady=pad_y)
     tk.Checkbutton(root, text="Keep XLSX/PDF files after ZIP", variable=keep_var, **check_opts).grid(row=6, column=1, sticky="w", padx=pad_x, pady=pad_y)
 
@@ -1517,13 +1526,18 @@ def main() -> None:
             if picked:
                 logo_path = os.path.abspath(picked)
 
+    generate_pdf = not args.no_pdf
+    if generate_pdf and not _pdf_available():
+        print("WARNING: reportlab is not installed; generating XLSX only.", file=sys.stderr)
+        generate_pdf = False
+
     # Generate
     xlsx_created, pdf_created, df = generate_invoices(
         csv_path=csv_path,
         outdir=outdir,
         nemo_base=nemo_base,
         api_token=(token or None),
-        generate_pdf=(not args.no_pdf),
+        generate_pdf=generate_pdf,
         logo_path=logo_path,
     )
     zips_created = [] if args.no_zip else create_monthly_invoice_zips(
@@ -1533,7 +1547,7 @@ def main() -> None:
     )
 
     msg = f"Created {xlsx_created} XLSX invoice(s)"
-    if not args.no_pdf:
+    if generate_pdf:
         msg += f" and {pdf_created} PDF invoice(s)"
     if not args.no_zip:
         msg += f" and {len(zips_created)} ZIP file(s)"
