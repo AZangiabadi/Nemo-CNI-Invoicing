@@ -284,6 +284,22 @@ def safe_filename(s: str) -> str:
     return s or "UNKNOWN_PI"
 
 
+def make_invoice_number(period_ym: str, pi_display_name: str, seq: int = 1) -> str:
+    """
+    Stable invoice number format: CNI-YYYYMM-LASTNAME-SEQ
+    Example: CNI-202603-DAVIES-001
+    """
+    period_code = str(period_ym or "").replace("-", "")
+    display = str(pi_display_name or "").strip()
+    if "," in display:
+        last_name = display.split(",", 1)[0].strip()
+    else:
+        parts = display.split()
+        last_name = parts[-1].strip() if parts else "UNKNOWNPI"
+    last_name_code = re.sub(r"[^A-Z0-9]+", "", last_name.upper())[:12] or "UNKNOWNPI"
+    return f"CNI-{period_code}-{last_name_code}-{int(seq):03d}"
+
+
 # -----------------------------
 # NEMO API helpers (optional)
 # -----------------------------
@@ -421,7 +437,7 @@ def write_table(ws, start_row: int, start_col: int, df_table: pd.DataFrame, curr
     return start_row + len(df_table) + 1
 
 
-def create_invoice_workbook(df_group: pd.DataFrame, pi_display_name: str, period_ym: str) -> Workbook:
+def create_invoice_workbook(df_group: pd.DataFrame, pi_display_name: str, period_ym: str, invoice_number: str) -> Workbook:
     wb = Workbook()
     ws = wb.active
     ws.title = "Invoice"
@@ -436,11 +452,14 @@ def create_invoice_workbook(df_group: pd.DataFrame, pi_display_name: str, period
     ws["E1"] = ml
     ws["G1"] = "Generated"
     ws["H1"] = dt.datetime.now()
+    ws["J1"] = "Invoice #"
+    ws["K1"] = invoice_number
 
-    for cell in ("A1", "D1", "G1"):
+    for cell in ("A1", "D1", "G1", "J1"):
         ws[cell].font = _BOLD
     ws["B1"].font = _TITLE
     ws["E1"].font = _TITLE
+    ws["K1"].font = _TITLE
 
     # Summary totals by lab
     summary_start = 3
@@ -617,6 +636,7 @@ def create_invoice_pdf(
     pi_display_name: str,
     pi_email: str,
     period_ym: str,
+    invoice_number: str,
     pdf_path: str,
     logo_path: Optional[str] = None,
 ) -> None:
@@ -716,6 +736,9 @@ def create_invoice_pdf(
         "NLeftBold",
         parent=styleNLeft,
         fontName="Helvetica-Bold",   # or Times-Bold
+        leading=11,
+        spaceBefore=0,
+        spaceAfter=0,
     )
 
     app_ids = set(df_group["Application identifier"].dropna().astype(str))
@@ -762,6 +785,7 @@ def create_invoice_pdf(
             [P(f"PI: {pi_display_name}", styleNLeftBold), "", ""],
             [P(f"Email: {pi_email or 'N/A'}", styleNLeftBold), "", ""],
             [P(f"Billing Month: {ml}", styleNLeftBold), "", ""],
+            [P(f"Invoice #: {invoice_number}", styleNLeftBold), "", ""],
             [P(f"Generated: {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}", styleNLeftBold), "", ""],
         ],
         colWidths=[
@@ -774,7 +798,8 @@ def create_invoice_pdf(
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (1, -1), 0),
+                ("BOTTOMPADDING", (2, 0), (2, -1), 2),
 
                 ("ALIGN", (1, 0), (1, 0), "CENTER"),   # title in center column
                 ("ALIGN", (2, 0), (2, 0), "RIGHT"),    # logo right
@@ -783,9 +808,10 @@ def create_invoice_pdf(
                 ("SPAN", (0, 2), (1, 2)),
                 ("SPAN", (0, 3), (1, 3)),
                 ("SPAN", (0, 4), (1, 4)),
-                ("ALIGN", (0, 1), (1, 4), "LEFT"),     # details left-aligned
+                ("SPAN", (0, 5), (1, 5)),
+                ("ALIGN", (0, 1), (1, 5), "LEFT"),     # details left-aligned
 
-                ("SPAN", (2, 0), (2, 4)),              # logo cell spans all rows
+                ("SPAN", (2, 0), (2, 5)),              # logo cell spans all rows
             ]
         ),
     )
@@ -1076,12 +1102,13 @@ def generate_invoices(
         nonempty_emails = grp["PI_email"].dropna().astype(str).str.strip()
         nonempty_emails = nonempty_emails[nonempty_emails != ""]
         pi_email = nonempty_emails.iloc[0] if not nonempty_emails.empty else ""
+        invoice_number = make_invoice_number(period, pi_name, seq=1)
 
         filename_safe = safe_filename(pi_name)
         period_label = month_label(period)
 
         # XLSX
-        wb = create_invoice_workbook(grp, pi_display_name=pi_name, period_ym=period)
+        wb = create_invoice_workbook(grp, pi_display_name=pi_name, period_ym=period, invoice_number=invoice_number)
         xlsx_path = os.path.join(outdir, f"{filename_safe} {period_label}.xlsx")
         wb.save(xlsx_path)
         xlsx_created += 1
@@ -1098,6 +1125,7 @@ def generate_invoices(
                         pi_display_name=pi_name,
                         pi_email=pi_email,
                         period_ym=period,
+                        invoice_number=invoice_number,
                         pdf_path=pdf_path,
                         logo_path=logo_path,
                     )
